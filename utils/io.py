@@ -3,6 +3,8 @@ import cv2
 import matplotlib.pyplot as plt
 import config
 import matplotlib.gridspec as gridspec
+from pathlib import Path
+from typing import Iterator
 
 class GeoFileData:
     def __init__(self, bands = 5):
@@ -72,6 +74,20 @@ class GeoFileData:
             ax_cb.set_aspect('auto')  # Ensure same height as image
         plt.show()
 
+def LoadBulkData(folder: str, patternMatch:str)->Iterator[GeoFileData]:
+    """Generates an iterator to read all the geo files in the folder
+
+    Args:
+        folder (str): path to the folder containing the files
+        patternMatch (str): regular ecpression match for the file
+
+    Yields:
+        Iterator[GeoFileData]: iterator containing geodata objects
+    """    
+    for file in Path(folder).glob(patternMatch):
+        data = GeoFileData()
+        data.ReadFile(str(file))
+        yield data
 
 if __name__ == "__main__":
 
