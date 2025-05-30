@@ -18,8 +18,17 @@ class PhaseCorrelation(Registration):
         self.aboutMe = "Registration using phase correlation"
 
     def Register(self, fixed:np.ndarray, moving:np.ndarray):
+
+        if(fixed.shape != moving.shape):
+            raise Exception (f"[ERROR]: fixed and moving shape must be same")
+
+        # Generate Hamming window
+        winY = np.hamming(fixed.shape[0])
+        winX = np.hamming(fixed.shape[1])
+        window = np.outer(winY, winX)
+
         # calculte shift
-        return cv2.phaseCorrelate(fixed, moving)
+        return cv2.phaseCorrelate(fixed * window, moving * window)
 
 
 class ImageAlignmentStrategy:
@@ -109,30 +118,64 @@ class ImageAlignmentStrategy:
         return paddingProps, fixedPadded, alignedPadded
 
     def AlignImages(self):
-        from utils import io
-        alignedImages = []
-        fixed = None  # normalized fixed for feature detection
+        from utils import io, config
 
-        for idx, data in enumerate(io.LoadBulkData(self.dataFolder, '*.tiff')):
-              # original image, possibly float32 or original dtype
-            # norm_img = cv2.normalize(original_img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)  # normalized uint8 for features
-            curImg = data.data[-1].astype(np.float32)
-            if idx == 0:
-                fixed = curImg
-                alignedImages.append(fixed)  # store original first frame as is
-            else:
-                moving = curImg
-                shift, response = self.registrationManager.Register(fixed, moving)
-                
-                paddingProps, fixedPadded, alignedPadded = self.AlignFixedAndMoving(fixed, moving, shift)
-                self.VisualizeOverlapArea(fixedPadded,alignedPadded)
+        print(f"[INFO]: Aligning images")
 
-                pause = 1
+        # alignment Lists
+        paddingLeft, paddingRight = [0], [0]
+        paddingTop, paddingBottom = [0], [0]
+        shiftX, shiftYAcc = [0], [0]
+        maxPadLeft, maxPadRight, maxPadBottom = 0, 0, 0
 
+        panBandID = config.GEOTIFFIMAGE_BANDS-1 # PANBand is used to determine shifts of frames as it is the one with maximum amount of incident radiation
+        for idx, data in enumerate(io.LoadBulkData(self.dataFolder, '*.tiff')): 
+            try:
+                curImg = np.flipud(data.data[panBandID]).astype(np.float32)
+                if idx == 0:
+                    fixed = curImg
+                else:
+                    moving = curImg
+                    shift, response = self.registrationManager.Register(fixed, moving)                
+                    paddingProps = self.DeterminePaddingArea(shift,moving.shape)
+                    
+                    # padding and shift values cumulated
+                    paddingLeft.append(paddingProps["padLeft"])
+                    paddingRight.append(paddingProps["padRight"])
+                    paddingTop.append(paddingProps["padTop"])
+                    paddingBottom.append(paddingProps["padBottom"])
+                    shiftX.append(int(shift[0]))
+                    shiftYAcc.append(shiftYAcc[-1] - int(shift[1])) # shift accumulation along Y
+                    
+                    # max padding values to determine size of total canvas
+                    maxPadLeft = max(maxPadLeft, paddingProps["padLeft"])
+                    maxPadRight = max(maxPadRight, paddingProps["padRight"])
+                    maxPadBottom = max(maxPadBottom, paddingProps["padBottom"])
 
-
-        return np.vstack(alignedImages)
+                    fixed = moving
+            except Exception as e:
+                print(f"[ERROR]: imageID: {idx}, bandID: {panBandID}, {e}")
         
+        # Align the images based on the calculated shifts
+        numImages = idx+1
+        canvasBands = []
+        # Determine the shifts of consecutive images
+        # Loading all bands everytime for each band, idea is to reduce the memory footprint of alignment lists, a design decision to be made based on priority:
+        # reduce memory footprint or memory load latency
+        for band in range(config.GEOTIFFIMAGE_BANDS):
+            bandHeight, bandWidth = data.data[band].shape
+            canvas = np.zeros((bandHeight + shiftYAcc[-1], bandWidth + maxPadLeft + maxPadRight), dtype = np.float32) # create a canvas to hold all the frames
+            for idx, data in enumerate(io.LoadBulkData(self.dataFolder, '*.tiff')):
+                try:
+                    curImg = np.flipud(data.data[band]).astype(np.float32)
+                    h = shiftYAcc[idx]
+                    w = maxPadLeft - shiftX[idx]
+                    canvas[h:h+bandHeight, w:w+bandWidth] = np.maximum(canvas[h:h+bandHeight, w:w+bandWidth], curImg) # take maximum of the overlap area
+                except Exception as e:
+                    print(f"[ERROR]: imageID: {idx}, bandID: {band}, {e}")
+
+            canvasBands.append(canvas)
+        return canvasBands
 
 if __name__ == "__main__":
 
@@ -149,75 +192,12 @@ if __name__ == "__main__":
 
     alignedData = imgAlignStrategy.AlignImages()
 
-                # orb = cv2.ORB_create(nfeatures=1000)
-                # kp1, des1 = orb.detectAndCompute(fixed_norm, None)
-                # kp2, des2 = orb.detectAndCompute(moving_norm, None)
+    plt.figure()
+    plt.imshow(alignedData[-1])
+    plt.clim([0, 1E4])
+    plt.show()
 
-                # if des1 is None or des2 is None:
-                #     raise RuntimeError("No descriptors found.")
-
-                # matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-                # matches = matcher.match(des1, des2)
-                # matches = sorted(matches, key=lambda x: x.distance)
-
-                # if len(matches) < 4:
-                #     raise RuntimeError("Not enough matches for reliable registration.")
-
-                # pts1 = np.float32([kp1[m.queryIdx].pt for m in matches])
-                # pts2 = np.float32([kp2[m.trainIdx].pt for m in matches])
-
-                # affine_transform, inliers = cv2.estimateAffinePartial2D(pts2, pts1, method=cv2.RANSAC)
-
-                # if affine_transform is None:
-                #     raise RuntimeError("Could not estimate transform.")
-
-                # # Enforce rigid transform by removing scaling/shearing
-                # R = affine_transform[:, :2]
-                # t = affine_transform[:, 2]
-
-                # U, _, Vt = np.linalg.svd(R)
-                # R_rigid = np.dot(U, Vt)
-                # rigid_transform = np.hstack([R_rigid, t.reshape(2, 1)])
-
-                # height, width = fixed_norm.shape
-
-                # # Warp the original image (not normalized) using the rigid transform
-                # aligned_original = cv2.warpAffine(original_img, rigid_transform, (width, height),
-                #                                 flags=cv2.INTER_LINEAR,
-                #                                 borderMode=cv2.BORDER_REFLECT)
-
-                # alignedImages.append(aligned_original)
-
-                # # Update fixed_norm for next iteration: normalize the aligned original image
-                # fixed_norm = cv2.normalize(aligned_original, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
-
-
-
-    #     def calculate_shifts(frames):
-    #     shifts = []
-    #     prev = None
-    #     for frame in frames:
-    #         gray = frame if len(frame.shape) == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    #         gray = gray.astype(np.float32)
-    #         if prev is not None:
-    #             shift, _ = cv2.phaseCorrelate(prev, gray)
-    #             shifts.append(shift)  # (dx, dy)
-    #         prev = gray
-    #     return shifts
-
-    # def align_frames(frames, shifts):
-    #     aligned_frames = [frames[0]]
-    #     total_dx, total_dy = 0, 0
-
-    #     for i, (dx, dy) in enumerate(shifts):
-    #         total_dx += dx
-    #         total_dy += dy
-
-    #         M = np.float32([[1, 0, -total_dx],
-    #                         [0, 1, -total_dy]])
-
-    #         aligned = cv2.warpAffine(frames[i + 1], M, (frames[0].shape[1], frames[0].shape[0]))
-    #         aligned_frames.append(aligned)
-
-    #     return aligned_frames
+    plt.figure()
+    plt.imshow(alignedData[0])
+    plt.clim([0, 1E4])
+    plt.show()
