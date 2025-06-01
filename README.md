@@ -1,1 +1,3 @@
 # GeoSat-image-processing
+
+This repository contains utilities and report (ipynb) for image processing of geo-sat hyperspectral-data. For installation create a new virtual environment and install python libraries from requirements.txt. Create a new environment variable 'GEOSATDATA_PATH' and provide link to data folder. The processing procedural-examples can be found in the geoSat_processing_main.ipynb. Backend implementation details are found in the utils module.
