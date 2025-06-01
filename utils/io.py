@@ -67,7 +67,7 @@ class GeoFileData:
         for idx in range(num_bands):
             ax_img = fig2.add_subplot(gs2[idx, 0])
             im = ax_img.imshow(self.data[idx])
-            ax_img.set_title(f'Band: {idx}')
+            ax_img.set_title(f'Band: {config.BAND_NAMES[idx]}')
 
             ax_cb = fig2.add_subplot(gs2[idx, 1])
             plt.colorbar(im, cax=ax_cb)

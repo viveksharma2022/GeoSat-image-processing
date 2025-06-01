@@ -12,9 +12,4 @@ BANDS = {"NIR": 0,
         "RED EDGE": 2,
         "RED": 3,
         "GREEN": 4}
-
-SENSOR_DISTANCE = {0: 1427,
-                   1: 1135,
-                   2: 825,
-                   3: 492,
-                   4: 0}
+BAND_NAMES = ["NIR", "BLUE", "RED EDGE", "RED", "GREEN"]

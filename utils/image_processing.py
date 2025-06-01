@@ -5,6 +5,8 @@ import sys, os
 import matplotlib.pyplot as plt
 
 class Registration:
+    """Registration interface
+    """    
     def __init__(self):
         self.aboutMe = "Registration interface"
             
@@ -17,8 +19,19 @@ class PhaseCorrelation(Registration):
         super().__init__()
         self.aboutMe = "Registration using phase correlation"
 
-    def Register(self, fixed:np.ndarray, moving:np.ndarray):
+    def Register(self, fixed:np.ndarray, moving:np.ndarray)->tuple[tuple, float]:
+        """Registers the data using phase correlation
 
+        Args:
+            fixed (np.ndarray): fixed image or array
+            moving (np.ndarray): moving image or array
+
+        Raises:
+            Exception: if size of fixed and moving are not same
+
+        Returns:
+            np.ndarray: the shift in xy and the response output indicating registration quality
+        """
         if(fixed.shape != moving.shape):
             raise Exception (f"[ERROR]: fixed and moving shape must be same")
 
@@ -36,7 +49,15 @@ class ImageAlignmentStrategy:
         self.registrationManager = registrationStrategy
         self.dataFolder = dataFolder
     
-    def GetRawData(self, bandNumber: int):
+    def GetRawData(self, bandNumber: int)->list:
+        """Segments raw data into bands and returns the selected bandNumber 
+
+        Args:
+            bandNumber (int): required bandNumber
+
+        Returns:
+            list: all consecutive data of the requested band
+        """
         from utils import io
         rawData = []
         for data in io.LoadBulkData(self.dataFolder, '*.tiff'):
@@ -48,14 +69,14 @@ class ImageAlignmentStrategy:
     
     @staticmethod
     def DeterminePaddingArea(shift: tuple, imageShape: np.ndarray)->dict:
-        """_summary_
+        """Computes the required padding area to create the canvas
 
         Args:
-            shift (tuple): _description_
-            imageShape (np.ndarray): _description_
+            shift (tuple): shift in XY determined by registration and to be accomodated from the center of the canvas
+            imageShape (np.ndarray): original image shape, (row, col)
 
         Returns:
-            dict: _description_
+            dict: Determined padding properties , padding left, right, top, bottom in pixels
         """        
         dx, dy = shift
         h,w = imageShape 
@@ -67,22 +88,29 @@ class ImageAlignmentStrategy:
         return padding
     
     def CreateCanvas(self, data:np.ndarray, paddingProps:dict, originalImageSize: tuple) -> np.ndarray:
-        """_summary_
+        """Creates a canvas and fills the data inside the canvas
 
         Args:
-            data (np.ndarray): _description_
-            paddingProps (dict): _description_
-            originalImageSize (tuple): _description_
+            data (np.ndarray): original data
+            paddingProps (dict): padding properties for canvas padding. Contains metainfo for pad left, right, top, left
+            originalImageSize (tuple): image XY size
 
         Returns:
-            np.ndarray: _description_
+            np.ndarray: canvas data and numpy array
         """        
         h,w = originalImageSize
         dataPadded = np.zeros((paddingProps["newHeight"],paddingProps["newWidth"]), dtype = np.float32)
         dataPadded[paddingProps["padTop"]:paddingProps["padTop"]+h, paddingProps["padLeft"]:paddingProps["padLeft"]+w] = data
         return dataPadded
     
-    def VisualizeOverlapArea(self, fixed, aligned, alpha = 0.5):
+    def VisualizeOverlapArea(self, fixed:np.ndarray, aligned:np.ndarray, alpha = 0.5):
+        """Visualize the overlap of the fixed and aligned data after registration
+
+        Args:
+            fixed (np.ndarray): fixed data
+            aligned (np.ndarray): aligned data
+            alpha (float, optional): alpha/ transperency. Defaults to 0.5.
+        """
         fixedNorm = cv2.normalize(fixed, None, 0.0, 1.0, cv2.NORM_MINMAX)
         alignedNorm = cv2.normalize(aligned, None, 0.0, 1.0, cv2.NORM_MINMAX)
         
@@ -93,19 +121,29 @@ class ImageAlignmentStrategy:
         plt.figure()
         plt.subplot(3,1,1)
         plt.imshow(fixedRGB)
-        plt.title("Fixed")
+        plt.title("Fixed padded")
 
         plt.subplot(3,1,2)
         plt.imshow(alignedRGB)
-        plt.title("Moving")
+        plt.title("Moving aligned ")
         
         plt.subplot(3,1,3)
         plt.imshow(mergedRGB)
-        plt.title("Registered")
+        plt.title("Overlay after registration")
         plt.show()
         
-    def AlignFixedAndMoving(self, fixed, moving, shift):
+    def AlignFixedAndMoving(self, fixed:np.ndarray, moving:np.ndarray, shift:tuple)->list[dict, np.ndarray, np.ndarray]:        
+        """Aligns the fixed and moving images with the provided shift. It is a simple aligner which assumes the 
+        info from shift, does not compute the shift
 
+        Args:
+            fixed (np.ndarray): fixed image
+            moving (np.ndarray): moving image
+            shift (tuple): shift in XY in pixels
+
+        Returns:
+            list[dict, np.ndarray, np.ndarray]: padding properties, fixed and aligned with padding
+        """        
         paddingProps = self.DeterminePaddingArea(shift,moving.shape)
         alignedPadded = self.CreateCanvas(moving, paddingProps, moving.shape)
         # Build translation matrix to shift within new canvas
@@ -118,7 +156,13 @@ class ImageAlignmentStrategy:
         fixedPadded = self.CreateCanvas(fixed, paddingProps, moving.shape)
         return paddingProps, fixedPadded, alignedPadded
 
-    def AlignImages(self, dataSupplied = None):
+    def AlignImages(self)->list:
+        """Aligns the individual bands from consecutive frames and assigns each into an aligned canvas. The list of canvases represent aligned data of 
+        each bands. The blending is currently based on the maximum of the intensities in the overlap area
+
+        Returns:
+            list: List of aligned band images
+        """        
         from utils import io, config
 
         print(f"[INFO]: Aligning images")
@@ -204,13 +248,6 @@ def CrossBandsAlign(bandImages: list)->list:
     for i in range(len(bandImages)):
         movingNorm = cv2.normalize(bandImages[i], None, 0 , 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
         minHeight = min(fixedNorm.shape[0], movingNorm.shape[0])
-        # plt.figure()
-        # plt.subplot(1,2,1)
-        # plt.imshow(fixedNorm)
-        # plt.subplot(1,2,2)
-        # plt.imshow(movingNorm)
-        # plt.show()
-
         offset, tform = ComputeOrbShift(fixedNorm[:minHeight,:], movingNorm[:minHeight,:])
         offsets.append(offset)
         tForms.append(tform)
@@ -234,7 +271,21 @@ def CrossBandsAlign(bandImages: list)->list:
     return interBandAlignedData
 
 
-def ComputeOrbShift(img1, img2):
+def ComputeOrbShift(img1:np.ndarray, img2:np.ndarray)->list[tuple, np.ndarray]:  
+    """Computes the registration transformation matrix based on ORB features matching. Useful for cross modality,
+    i.e. for use cases involving registration of data from different bands
+
+        img1 (np.ndarray): fixed image
+        img2 (np.ndarray): moving image
+
+    Raises:
+        ValueError: if no descriptors are found, happens on low textured images 
+        ValueError: if there are not enough matches between the two images
+
+    Returns:
+        list[tuple, np.ndarray]: tuple with shift in xy and the affine transformation matrix
+    """
+    
     # Convert to grayscale if needed
     if len(img1.shape) == 3:
         img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
@@ -274,6 +325,14 @@ def ComputeOrbShift(img1, img2):
     return (0, 0), None
 
 def StandardizeData(data:list)->list:
+    """Helper function to standardize data
+
+    Args:
+        data (list): original list of data
+
+    Returns:
+        list: standardization output
+    """    
     standardizedData = []
     for dat in data:
         meanVal = np.mean(dat)
@@ -281,8 +340,17 @@ def StandardizeData(data:list)->list:
         standardizedData.append((dat - meanVal)/ (stdVal + 1e-8))
     return standardizedData
 
-def NormalizeSNR(bandData:list, panBandData: np.ndarray, normFactor = 0.9):
+def NormalizeSNR(bandData:list, panBandData: np.ndarray, normFactor = 0.9)->np.ndarray:
+    """Normalize the SNR of list of data with respect to the PAN data
 
+    Args:
+        bandData (list): 
+        panBandData (np.ndarray): PAN band data
+        normFactor (float, optional): data after SNR normalization. Defaults to 0.9 within +-10%
+
+    Returns:
+        np.ndarray: _description_
+    """
     def GetSNR(data:np.ndarray)->np.float32:
         meanVal = np.nanmean(data)
         stdVal = np.nanstd(data)
@@ -314,32 +382,8 @@ if __name__ == "__main__":
               }
     
     imgAlignStrategy = ImageAlignmentStrategy(PhaseCorrelation(), params["dataFolder"]) # set the strategy to align images
-    # rawData = imgAlignStrategy.GetRawData(bandNumber = bandNumber)
-
     intraBandAlignedData = imgAlignStrategy.AlignImages()
-
-    # # Visualize aligned bands
-    # plt.figure(figsize = (10,30))
-    # for bandId in range(utils.config.GEOTIFFIMAGE_BANDS):
-    #     plt.subplot(utils.config.GEOTIFFIMAGE_BANDS, utils.config.GEOTIFFIMAGE_BANDS//2, bandId+1)
-    #     plt.imshow(intraBandAlignedData[bandId], cmap = 'gray')
-    #     plt.clim([0,1.2E4])
-    #     plt.title(f"BandID: {bandId}")
-    #     plt.colorbar()
-    #     plt.tight_layout()
-    # plt.show()
-
     intraBandAlignedDataSNRNorm = NormalizeSNR(intraBandAlignedData, intraBandAlignedData[-1])
-
-    # plt.figure()
-    # for idx, dat in enumerate(intraBandAlignedDataSNRNorm):
-    #     plt.subplot(5,2,idx+1)
-    #     plt.imshow(dat)
-    #     plt.clim([0,1E4])
-    #     plt.colorbar()
-    #     plt.tight_layout()
-    # plt.show()
-
     interBandAlignedData = CrossBandsAlign(intraBandAlignedDataSNRNorm)
     
 
