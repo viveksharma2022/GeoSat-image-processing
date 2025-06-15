@@ -231,6 +231,7 @@ def CrossBandsAlign(bandImages: list)->list:
     Returns:
         list: _description_
     """
+    import config
     newBandHeight = 0
     totalBands = len(bandImages)
     maxBandHeight = 0
@@ -245,7 +246,10 @@ def CrossBandsAlign(bandImages: list)->list:
 
     maxPadLeft, maxPadRight, maxPadTop, maxPadBottom = 0, 0 ,0 ,0
     fixedNorm = cv2.normalize(bandImages[totalBands - 1], None, 0 , 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
-    for i in range(len(bandImages)):
+    
+    rgbIndex = [config.BAND_NAMES.index(c) for c in ["RED", "BLUE", "GREEN"] ] # Register only RGB images
+    print(f"rgbIndex, {rgbIndex}")
+    for idx, i in enumerate(rgbIndex):
         movingNorm = cv2.normalize(bandImages[i], None, 0 , 255, cv2.NORM_MINMAX, cv2.CV_8UC1)
         minHeight = min(fixedNorm.shape[0], movingNorm.shape[0])
         offset, tform = ComputeOrbShift(fixedNorm[:minHeight,:], movingNorm[:minHeight,:])
@@ -261,11 +265,11 @@ def CrossBandsAlign(bandImages: list)->list:
     # warp images to align all the bands together
     interBandAlignedData = []
     cW, cH = newBandWidth + maxPadLeft + maxPadRight + 1, newBandHeight + maxPadTop + maxPadBottom + 1
-    for i in range(len(bandImages)):
+    for idx, i in enumerate(rgbIndex):
         canvas = np.zeros((cH, cW))
         h, w = bandImages[i].shape
         canvas[maxPadTop:maxPadTop+h, maxPadLeft:maxPadLeft+w] = bandImages[i]
-        canvas = cv2.warpAffine(canvas, tForms[i], (cW, cH))
+        canvas = cv2.warpAffine(canvas, tForms[idx], (cW, cH))
         interBandAlignedData.append(canvas)
 
     return interBandAlignedData
